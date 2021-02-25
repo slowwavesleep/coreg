@@ -1,8 +1,12 @@
-import numpy as np
 from time import time
+from collections import defaultdict
+
+import numpy as np
+from sklearn.base import RegressorMixin
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.utils import shuffle
 from sklearn.metrics import mean_squared_error
+
 from coreg.data_utils import load_data
 
 
@@ -27,6 +31,8 @@ class Coreg:
         self.h1_temp = KNeighborsRegressor(n_neighbors=self.n_neighbors_1, p=self.power_1)
         self.h2_temp = KNeighborsRegressor(n_neighbors=self.n_neighbors_2, p=self.power_2)
 
+        self.is_fitted = False
+
     def add_data(self, data_dir: str):
         """
         Adds data and splits into labeled and unlabeled.
@@ -35,15 +41,15 @@ class Coreg:
 
     def run_trials(self,
                    num_train: int = 100,
+                   num_test: int = 100,
                    trials: int = 10,
-                   verbose: bool = False,
-                   num_test: int = 100):
+                   verbose: bool = False):
         """
         Runs multiple trials of training.
         """
         self.num_trials = trials
-        self._initialize_metrics()
         self.trial = 0
+        self._initialize_storage()
         while self.trial < self.num_trials:
             t0 = time()
             print('Starting trial {}:'.format(self.trial + 1))            
@@ -52,9 +58,10 @@ class Coreg:
                        num_test=num_test,
                        verbose=verbose,
                        store_results=True)
-            print('Finished trial {}: {:0.2f}s elapsed\n'.format(
-                self.trial + 1, time() - t0))
+            print('Finished trial {}: {:0.2f}s elapsed\n'.format(self.trial + 1, time() - t0))
             self.trial += 1
+        self._set_best_estimator()
+        self.is_fitted = True
 
     def train(self,
               random_state: int = -1,
@@ -83,8 +90,8 @@ class Coreg:
             print('Finished {} iterations: {:0.2f}s'.format(t, time() - start))
 
     def _run_iteration(self,
-                       t,
-                       t0,
+                       t: int,
+                       start: float,
                        verbose: bool = False,
                        store_results: bool = False):
         """
@@ -93,7 +100,7 @@ class Coreg:
         """
         stop_training = False
         if verbose:
-            print('Started iteration {}: {:0.2f}s'.format(t, time()-t0))
+            print('Started iteration {}: {:0.2f}s'.format(t, time() - start))
         self._find_points_to_add()
         added = self._add_points()
         if added:
@@ -122,11 +129,11 @@ class Coreg:
         return added
 
     @staticmethod
-    def _compute_delta(omega,
-                       L_X,
-                       L_y,
-                       h,
-                       h_temp):
+    def _compute_delta(omega: np.array,
+                       L_X: np.array,
+                       L_y: np.array,
+                       h: RegressorMixin,
+                       h_temp: RegressorMixin):
         """
         Computes the improvement in MSE among the neighbors of the point being
         evaluated.
@@ -140,10 +147,10 @@ class Coreg:
         return delta
 
     def _compute_deltas(self,
-                        L_X,
-                        L_y,
-                        h,
-                        h_temp):
+                        L_X: np.array,
+                        L_y: np.array,
+                        h: RegressorMixin,
+                        h_temp: RegressorMixin):
         """
         Computes the improvements in local MSE for all points in pool.
         """
@@ -172,12 +179,14 @@ class Coreg:
         test1_hat = self.h1.predict(self.X_test)
         test2_hat = self.h2.predict(self.X_test)
         test_hat = 0.5 * (test1_hat + test2_hat)
-        self.mse1_train = mean_squared_error(train1_hat, self.y_labeled)
-        self.mse1_test = mean_squared_error(test1_hat, self.y_test)
-        self.mse2_train = mean_squared_error(train2_hat, self.y_labeled)
-        self.mse2_test = mean_squared_error(test2_hat, self.y_test)
-        self.mse_train = mean_squared_error(train_hat, self.y_labeled)
-        self.mse_test = mean_squared_error(test_hat, self.y_test)
+
+        self.mse1_train = mean_squared_error(train1_hat, self.y_labeled, squared=False)
+        self.mse1_test = mean_squared_error(test1_hat, self.y_test, squared=False)
+        self.mse2_train = mean_squared_error(train2_hat, self.y_labeled, squared=False)
+        self.mse2_test = mean_squared_error(test2_hat, self.y_test, squared=False)
+        self.mse_train = mean_squared_error(train_hat, self.y_labeled, squared=False)
+        self.mse_test = mean_squared_error(test_hat, self.y_test, squared=False)
+
         if verbose:
             print('MSEs:')
             print('  KNN1:')
@@ -196,6 +205,7 @@ class Coreg:
         """
         self.to_add = {'x1': None, 'y1': None, 'idx1': None,
                        'x2': None, 'y2': None, 'idx2': None}
+
         # Keep track of added idxs
         added_idxs = []
         for idx_h in [1, 2]:
@@ -240,17 +250,19 @@ class Coreg:
         self.U_y_pool = self.U_y_pool[:self.pool_size]
         self.U_idx_pool = self.U_idx_pool[:self.pool_size]
 
-    def _initialize_metrics(self):
+    def _initialize_storage(self):
         """
-        Sets up metrics to be stored.
+        Sets up metrics and estimators to be stored.
         """
-        initial_metrics = np.full((self.num_trials, self.max_iters+1), np.inf)
-        self.mses1_train = np.copy(initial_metrics)
-        self.mses1_test = np.copy(initial_metrics)
-        self.mses2_train = np.copy(initial_metrics)
-        self.mses2_test = np.copy(initial_metrics)
-        self.mses_train = np.copy(initial_metrics)
-        self.mses_test = np.copy(initial_metrics)
+        self.mses1_train = defaultdict(lambda: dict())
+        self.mses1_test = defaultdict(lambda: dict())
+        self.mses2_train = defaultdict(lambda: dict())
+        self.mses2_test = defaultdict(lambda: dict())
+        self.mses_train = defaultdict(lambda: dict())
+        self.mses_test = defaultdict(lambda: dict())
+
+        self.first_estimators = defaultdict(lambda: dict())
+        self.second_estimators = defaultdict(lambda: dict())
 
     def _remove_from_unlabeled(self):
         # Remove added examples from unlabeled
@@ -263,30 +275,28 @@ class Coreg:
         self.U_y = np.delete(self.U_y, to_remove, axis=0)
 
     def _split_data(self,
-                    random_state=-1,
-                    num_labeled=100,
-                    num_test=1000):
+                    random_state: int = -1,
+                    num_train: int = 100,
+                    num_test: int = 1000):
         """
         Shuffles data and splits it into train, test, and unlabeled sets.
         """
+        test_end = num_train + num_test
+
         if random_state >= 0:
-            self.X_shuffled, self.y_shuffled, self.shuffled_indices = shuffle(self.X,
-                                                                              self.y,
-                                                                              range(self.y.size),
-                                                                              random_state=random_state)
+            X_shuffled, y_shuffled = shuffle(self.X[:test_end],
+                                             self.y[:test_end])
         else:
-            self.X_shuffled = self.X[:]
-            self.y_shuffled = self.y[:]
-            self.shuffled_indices = range(self.y.size)
+            X_shuffled = self.X[:test_end]
+            y_shuffled = self.y[:test_end]
 
         # Initial labeled, test, and unlabeled sets
-        test_end = num_labeled + num_test
-        self.X_labeled = self.X_shuffled[:num_labeled]
-        self.y_labeled = self.y_shuffled[:num_labeled]
-        self.X_test = self.X_shuffled[num_labeled:test_end]
-        self.y_test = self.y_shuffled[num_labeled:test_end]
-        self.X_unlabeled = self.X_shuffled[test_end:]
-        self.y_unlabeled = self.y_shuffled[test_end:]
+        self.X_labeled = X_shuffled[:num_train]
+        self.y_labeled = y_shuffled[:num_train]
+        self.X_test = X_shuffled[num_train:test_end]
+        self.y_test = y_shuffled[num_train:test_end]
+        self.X_unlabeled = self.X[test_end:]
+        self.y_unlabeled = self.y[test_end:]
 
         # Up-to-date training sets and unlabeled set
         self.L1_X = self.X_labeled[:]
@@ -300,9 +310,37 @@ class Coreg:
         """
         Stores current MSEs.
         """
-        self.mses1_train[self.trial, iteration] = self.mse1_train
-        self.mses1_test[self.trial, iteration] = self.mse1_test
-        self.mses2_train[self.trial, iteration] = self.mse2_train
-        self.mses2_test[self.trial, iteration] = self.mse2_test
-        self.mses_train[self.trial, iteration] = self.mse_train
-        self.mses_test[self.trial, iteration] = self.mse_test
+        self.mses1_train[f"trial_{self.trial}"][f"iter_{iteration}"] = self.mse1_train
+        self.mses1_test[f"trial_{self.trial}"][f"iter_{iteration}"] = self.mse1_test
+        self.mses2_train[f"trial_{self.trial}"][f"iter_{iteration}"] = self.mse2_train
+        self.mses2_test[f"trial_{self.trial}"][f"iter_{iteration}"] = self.mse2_test
+        self.mses_train[f"trial_{self.trial}"][f"iter_{iteration}"] = self.mse_train
+        self.mses_test[f"trial_{self.trial}"][f"iter_{iteration}"] = self.mse_test
+
+        self.first_estimators[f"trial_{self.trial}"][f"iter_{iteration}"] = self.h1
+        self.second_estimators[f"trial_{self.trial}"][f"iter_{iteration}"] = self.h2
+
+    def _set_best_estimator(self):
+        result = []
+        for key, value in self.mses_test.items():
+            best_iter_num = min(value, key=value.get)
+            best_iter_score = value[best_iter_num]
+            result.append((key, best_iter_num, best_iter_score))
+        best_trial, best_iter, _ = sorted(result, key=lambda item: item[2])[0]
+
+        self.best_h1_score = self.mses1_test[best_trial][best_iter]
+        self.best_h2_score = self.mses2_test[best_trial][best_iter]
+        self.best_combined_score = self.mses_test[best_trial][best_iter]
+        self.h1 = self.first_estimators[best_trial][best_iter]
+        self.h2 = self.second_estimators[best_trial][best_iter]
+
+    def predict(self, X):
+        if self.is_fitted:
+            h1_preds = self.h1.predict(X)
+            h2_preds = self.h2.predict(X)
+            return np.mean([h1_preds, h2_preds], axis=0)
+        else:
+            print("The model is not fitted!")
+
+
+# TODO implement sklearn-style fit
