@@ -1,10 +1,10 @@
-from coreg import Coreg
+from coreg.coreg import Coreg
 import numpy as np
 
 
 ###################################################
 
-data_dir = '../data/skillcraft'
+data_dir = 'data/skillcraft'
 k1 = 3
 k2 = 3
 p1 = 2

@@ -1,76 +1,97 @@
 import numpy as np
 from time import time
-from scipy.spatial.distance import minkowski
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.utils import shuffle
 from sklearn.metrics import mean_squared_error
-from data_utils import load_data
+from coreg.data_utils import load_data
 
 
-class Coreg():
+class Coreg:
     """
     Instantiates a CoReg regressor.
     """
-    def __init__(self, k1=3, k2=3, p1=2, p2=5, max_iters=100, pool_size=100):
-        self.k1, self.k2 = k1, k2 # number of neighbors
-        self.p1, self.p2 = p1, p2 # distance metrics
+    def __init__(self,
+                 n_neighbors_1: int = 3,
+                 n_neighbors_2: int = 3,
+                 power_1: int = 2,
+                 power_2: int = 5,
+                 max_iters: int = 100,
+                 pool_size: int = 100):
+
+        self.n_neighbors_1, self.n_neighbors_2 = n_neighbors_1, n_neighbors_2  # number of neighbors
+        self.power_1, self.power_2 = power_1, power_2  # distance metrics
         self.max_iters = max_iters
         self.pool_size = pool_size
-        self.h1 = KNeighborsRegressor(n_neighbors=self.k1, p=self.p1)
-        self.h2 = KNeighborsRegressor(n_neighbors=self.k2, p=self.p2)
-        self.h1_temp = KNeighborsRegressor(n_neighbors=self.k1, p=self.p1)
-        self.h2_temp = KNeighborsRegressor(n_neighbors=self.k2, p=self.p2)
+        self.h1 = KNeighborsRegressor(n_neighbors=self.n_neighbors_1, p=self.power_1)
+        self.h2 = KNeighborsRegressor(n_neighbors=self.n_neighbors_2, p=self.power_2)
+        self.h1_temp = KNeighborsRegressor(n_neighbors=self.n_neighbors_1, p=self.power_1)
+        self.h2_temp = KNeighborsRegressor(n_neighbors=self.n_neighbors_2, p=self.power_2)
 
-    def add_data(self, data_dir):
+    def add_data(self, data_dir: str):
         """
         Adds data and splits into labeled and unlabeled.
         """
         self.X, self.y = load_data(data_dir)
 
-    def run_trials(self, num_train=100, trials=10, verbose=False):
+    def run_trials(self,
+                   num_train: int = 100,
+                   trials: int = 10,
+                   verbose: bool = False):
         """
         Runs multiple trials of training.
         """
-        self.num_train = num_train
         self.num_trials = trials
         self._initialize_metrics()
         self.trial = 0
         while self.trial < self.num_trials:
             t0 = time()
             print('Starting trial {}:'.format(self.trial + 1))            
-            self.train(random_state=(self.trial+self.num_train),
-                num_labeled=self.num_train, num_test=1000, verbose=verbose,
-                store_results=True)
+            self.train(random_state=(self.trial + num_train),
+                       num_labeled=num_train,
+                       num_test=1000, verbose=verbose,
+                       store_results=True)
             print('Finished trial {}: {:0.2f}s elapsed\n'.format(
                 self.trial + 1, time() - t0))
             self.trial += 1
 
-    def train(self, random_state=-1, num_labeled=100, num_test=1000,
-        verbose=False, store_results=False):
+    def train(self,
+              random_state: int = -1,
+              num_labeled: int = 100,
+              num_test: int = 1000,
+              verbose: bool = False,
+              store_results: bool = False):
         """
         Trains the CoReg regressor.
         """
         t0 = time()
         self._split_data(random_state, num_labeled, num_test)
         self._fit_and_evaluate(verbose)
-        if store_results: self._store_results(0)
+        if store_results:
+            self._store_results(0)
         self._get_pool()
-        if verbose: print('Initialized h1, h2: {:0.2f}s\n'.format(time()-t0))
-        for t in range(1, self.max_iters+1):
+        if verbose:
+            print('Initialized h1, h2: {:0.2f}s\n'.format(time()-t0))
+        for t in range(1, self.max_iters + 1):
             stop_training = self._run_iteration(t, t0, verbose, store_results)
             if stop_training:
                 if verbose:
                     print('Done in {} iterations: {:0.2f}s'.format(t, time()-t0))
                 break
-        if verbose: print('Finished {} iterations: {:0.2f}s'.format(t, time()-t0))
+        if verbose:
+            print('Finished {} iterations: {:0.2f}s'.format(t, time()-t0))
 
-    def _run_iteration(self, t, t0, verbose=False, store_results=False):
+    def _run_iteration(self,
+                       t,
+                       t0,
+                       verbose: bool = False,
+                       store_results: bool = False):
         """
         Run t-th iteration of co-training, returns stop_training=True if
         no more unlabeled points are added to label sets.
         """
         stop_training = False
-        if verbose: print('Started iteration {}: {:0.2f}s'.format(t, time()-t0))
+        if verbose:
+            print('Started iteration {}: {:0.2f}s'.format(t, time()-t0))
         self._find_points_to_add()
         added = self._add_points()
         if added:
@@ -98,7 +119,12 @@ class Coreg():
             added = True
         return added
 
-    def _compute_delta(self, omega, L_X, L_y, h, h_temp):
+    @staticmethod
+    def _compute_delta(omega,
+                       L_X,
+                       L_y,
+                       h,
+                       h_temp):
         """
         Computes the improvement in MSE among the neighbors of the point being
         evaluated.
@@ -111,7 +137,11 @@ class Coreg():
                       h_temp.predict(L_X[idx_o].reshape(1, -1))) ** 2
         return delta
 
-    def _compute_deltas(self, L_X, L_y, h, h_temp):
+    def _compute_deltas(self,
+                        L_X,
+                        L_y,
+                        h,
+                        h_temp):
         """
         Computes the improvements in local MSE for all points in pool.
         """
@@ -130,7 +160,7 @@ class Coreg():
             deltas[idx_u] = delta
         return deltas
 
-    def _evaluate_metrics(self, verbose):
+    def _evaluate_metrics(self, verbose: bool):
         """
         Evaluates KNN regressors on training and test data.
         """
@@ -179,7 +209,8 @@ class Coreg():
             # Add largest delta (improvement)
             sort_idxs = np.argsort(deltas)[::-1] # max to min
             max_idx = sort_idxs[0]
-            if max_idx in added_idxs: max_idx = sort_idxs[1]
+            if max_idx in added_idxs:
+                max_idx = sort_idxs[1]
             if deltas[max_idx] > 0:
                 added_idxs.append(max_idx)
                 x_u = self.U_X_pool[max_idx].reshape(1, -1)
@@ -188,7 +219,7 @@ class Coreg():
                 self.to_add['y' + str(idx_h)] = y_u_hat
                 self.to_add['idx' + str(idx_h)] = self.U_idx_pool[max_idx]
 
-    def _fit_and_evaluate(self, verbose):
+    def _fit_and_evaluate(self, verbose: bool):
         """
         Fits h1 and h2 and evaluates metrics.
         """
@@ -200,8 +231,9 @@ class Coreg():
         """
         Gets unlabeled pool and indices of unlabeled.
         """
-        self.U_X_pool, self.U_y_pool, self.U_idx_pool = shuffle(
-            self.U_X, self.U_y, range(self.U_y.size))
+        self.U_X_pool, self.U_y_pool, self.U_idx_pool = shuffle(self.U_X,
+                                                                self.U_y,
+                                                                range(self.U_y.size))
         self.U_X_pool = self.U_X_pool[:self.pool_size]
         self.U_y_pool = self.U_y_pool[:self.pool_size]
         self.U_idx_pool = self.U_idx_pool[:self.pool_size]
@@ -228,7 +260,10 @@ class Coreg():
         self.U_X = np.delete(self.U_X, to_remove, axis=0)
         self.U_y = np.delete(self.U_y, to_remove, axis=0)
 
-    def _split_data(self, random_state=-1, num_labeled=100, num_test=1000):
+    def _split_data(self,
+                    random_state=-1,
+                    num_labeled=100,
+                    num_test=1000):
         """
         Shuffles data and splits it into train, test, and unlabeled sets.
         """
@@ -259,9 +294,9 @@ class Coreg():
         """
         Stores current MSEs.
         """
-        self.mses1_train[self.trial,iteration] = self.mse1_train
-        self.mses1_test[self.trial,iteration] = self.mse1_test
-        self.mses2_train[self.trial,iteration] = self.mse2_train
-        self.mses2_test[self.trial,iteration] = self.mse2_test
-        self.mses_train[self.trial,iteration] = self.mse_train
-        self.mses_test[self.trial,iteration] = self.mse_test
+        self.mses1_train[self.trial, iteration] = self.mse1_train
+        self.mses1_test[self.trial, iteration] = self.mse1_test
+        self.mses2_train[self.trial, iteration] = self.mse2_train
+        self.mses2_test[self.trial, iteration] = self.mse2_test
+        self.mses_train[self.trial, iteration] = self.mse_train
+        self.mses_test[self.trial, iteration] = self.mse_test
