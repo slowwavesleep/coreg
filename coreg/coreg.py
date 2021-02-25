@@ -36,7 +36,8 @@ class Coreg:
     def run_trials(self,
                    num_train: int = 100,
                    trials: int = 10,
-                   verbose: bool = False):
+                   verbose: bool = False,
+                   num_test: int = 100):
         """
         Runs multiple trials of training.
         """
@@ -48,7 +49,8 @@ class Coreg:
             print('Starting trial {}:'.format(self.trial + 1))            
             self.train(random_state=(self.trial + num_train),
                        num_labeled=num_train,
-                       num_test=1000, verbose=verbose,
+                       num_test=num_test,
+                       verbose=verbose,
                        store_results=True)
             print('Finished trial {}: {:0.2f}s elapsed\n'.format(
                 self.trial + 1, time() - t0))
@@ -63,22 +65,22 @@ class Coreg:
         """
         Trains the CoReg regressor.
         """
-        t0 = time()
+        start = time()
         self._split_data(random_state, num_labeled, num_test)
         self._fit_and_evaluate(verbose)
         if store_results:
             self._store_results(0)
         self._get_pool()
         if verbose:
-            print('Initialized h1, h2: {:0.2f}s\n'.format(time()-t0))
+            print('Initialized h1, h2: {:0.2f}s\n'.format(time() - start))
         for t in range(1, self.max_iters + 1):
-            stop_training = self._run_iteration(t, t0, verbose, store_results)
+            stop_training = self._run_iteration(t, start, verbose, store_results)
             if stop_training:
                 if verbose:
-                    print('Done in {} iterations: {:0.2f}s'.format(t, time()-t0))
+                    print('Done in {} iterations: {:0.2f}s'.format(t, time() - start))
                 break
         if verbose:
-            print('Finished {} iterations: {:0.2f}s'.format(t, time()-t0))
+            print('Finished {} iterations: {:0.2f}s'.format(t, time() - start))
 
     def _run_iteration(self,
                        t,
@@ -268,12 +270,15 @@ class Coreg:
         Shuffles data and splits it into train, test, and unlabeled sets.
         """
         if random_state >= 0:
-            self.X_shuffled, self.y_shuffled, self.shuffled_indices = shuffle(
-                self.X, self.y, range(self.y.size), random_state=random_state)
+            self.X_shuffled, self.y_shuffled, self.shuffled_indices = shuffle(self.X,
+                                                                              self.y,
+                                                                              range(self.y.size),
+                                                                              random_state=random_state)
         else:
             self.X_shuffled = self.X[:]
             self.y_shuffled = self.y[:]
             self.shuffled_indices = range(self.y.size)
+
         # Initial labeled, test, and unlabeled sets
         test_end = num_labeled + num_test
         self.X_labeled = self.X_shuffled[:num_labeled]
@@ -282,6 +287,7 @@ class Coreg:
         self.y_test = self.y_shuffled[num_labeled:test_end]
         self.X_unlabeled = self.X_shuffled[test_end:]
         self.y_unlabeled = self.y_shuffled[test_end:]
+
         # Up-to-date training sets and unlabeled set
         self.L1_X = self.X_labeled[:]
         self.L1_y = self.y_labeled[:]
