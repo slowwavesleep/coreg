@@ -20,30 +20,51 @@ class Coreg:
                  power_1: int = 2,
                  power_2: int = 5,
                  max_iters: int = 100,
-                 pool_size: int = 100):
+                 pool_size: int = 100,
+                 n_jobs: int = 1,
+                 weights_1: str = "uniform",
+                 weights_2: str = "uniform"):
 
         self.n_neighbors_1, self.n_neighbors_2 = n_neighbors_1, n_neighbors_2  # number of neighbors
         self.power_1, self.power_2 = power_1, power_2  # distance metrics
         self.max_iters = max_iters
         self.pool_size = pool_size
-        self.h1 = KNeighborsRegressor(n_neighbors=self.n_neighbors_1, p=self.power_1)
-        self.h2 = KNeighborsRegressor(n_neighbors=self.n_neighbors_2, p=self.power_2)
-        self.h1_temp = KNeighborsRegressor(n_neighbors=self.n_neighbors_1, p=self.power_1)
-        self.h2_temp = KNeighborsRegressor(n_neighbors=self.n_neighbors_2, p=self.power_2)
+        self.h1 = KNeighborsRegressor(n_neighbors=self.n_neighbors_1,
+                                      p=self.power_1,
+                                      weights=weights_1,
+                                      n_jobs=n_jobs)
+        self.h2 = KNeighborsRegressor(n_neighbors=self.n_neighbors_2,
+                                      p=self.power_2,
+                                      weights=weights_2,
+                                      n_jobs=n_jobs)
+        self.h1_temp = KNeighborsRegressor(n_neighbors=self.n_neighbors_1,
+                                           p=self.power_1,
+                                           weights=weights_1,
+                                           n_jobs=n_jobs)
+        self.h2_temp = KNeighborsRegressor(n_neighbors=self.n_neighbors_2,
+                                           p=self.power_2,
+                                           weights=weights_2,
+                                           n_jobs=n_jobs)
 
         self.is_fitted = False
 
-    def add_data(self, data_dir: str):
+        self.num_trials = None
+        self.trial = None
+        self.X = None
+        self.y = None
+
+    def add_data(self, labeled_path: str, unlabeled_path: str):
         """
         Adds data and splits into labeled and unlabeled.
         """
-        self.X, self.y = load_data(data_dir)
+        self.X, self.y = load_data(labeled_path, unlabeled_path)
 
     def run_trials(self,
                    num_train: int = 100,
                    num_test: int = 100,
                    trials: int = 10,
-                   verbose: bool = False):
+                   verbose: bool = False,
+                   random_state: int = 42):
         """
         Runs multiple trials of training.
         """
@@ -53,7 +74,7 @@ class Coreg:
         while self.trial < self.num_trials:
             t0 = time()
             print('Starting trial {}:'.format(self.trial + 1))            
-            self.train(random_state=(self.trial + num_train),
+            self.train(random_state=random_state,
                        num_labeled=num_train,
                        num_test=num_test,
                        verbose=verbose,
@@ -285,7 +306,8 @@ class Coreg:
 
         if random_state >= 0:
             X_shuffled, y_shuffled = shuffle(self.X[:test_end],
-                                             self.y[:test_end])
+                                             self.y[:test_end],
+                                             random_state=random_state)
         else:
             X_shuffled = self.X[:test_end]
             y_shuffled = self.y[:test_end]

@@ -9,6 +9,11 @@ Original implementation author: [Neal Jean](https://github.com/nealjean)
 
 ## Description
 
-The main idea of the CoReg algorithm is to fit two estimators with different parameters, which are then used to make predictions on unlabeled data. Predictions of the first estimator with high confidence (see the article for details) are added to the training set of the second estimator, and vice versa until a certain criteria is met.
+The main idea of the CoReg algorithm is to fit two estimators with different parameters, which are then used to make
+predictions on unlabeled data. Predictions of the first estimator with high confidence (see the article for details)
+are added to the training set of the second estimator, and vice versa until certain criteria is met.
 
 In theory, this should be helpful when there's a lot of unlabeled examples, but few labeled ones.
+
+At the moment I'm making changes to solve a specific problem. If it proves to be efficient, I'll generalize
+to arbitrary datasets.

@@ -3,5 +3,6 @@
 *DS_Store*
 *.cache*
 *.ipynb_checkpoints*
-/data/wells/
+/data
 /coreg_preds.csv
+/coreg_preds_old.csv
